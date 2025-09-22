@@ -98,18 +98,34 @@ class IndexTTS2WithLogging(IndexTTS2):
             logger.info("步骤1: 开始设备检测和配置...")
             log_memory_usage("设备检测前")
             
-            # 临时修改父类的__init__方法来添加日志
-            original_init = super().__init__
+            # 监控初始化各个阶段
+            logger.info("步骤2: 开始调用IndexTTS2父类初始化...")
             
-            # 先进行基础初始化
-            logger.info("步骤2: 初始化基础配置...")
-            super().__init__(*args, **kwargs)
+            # 重写print函数来捕获所有输出
+            import sys
+            from io import StringIO
+            old_stdout = sys.stdout
+            sys.stdout = buffer = StringIO()
+            
+            try:
+                super().__init__(*args, **kwargs)
+                # 获取所有输出并作为日志记录
+                output = buffer.getvalue()
+                if output:
+                    for line in output.strip().split('\n'):
+                        if line.strip():
+                            logger.info(f"[初始化输出] {line}")
+            finally:
+                sys.stdout = old_stdout
             
             logger.info("IndexTTS2初始化成功完成!")
             log_memory_usage("完全初始化后")
             
         except Exception as e:
             logger.error(f"IndexTTS2初始化过程中出错: {e}")
+            logger.error(f"错误类型: {type(e).__name__}")
+            import traceback
+            logger.error(f"完整错误信息: {traceback.format_exc()}")
             log_memory_usage("初始化失败时")
             raise
 

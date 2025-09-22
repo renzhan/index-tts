@@ -76,17 +76,50 @@ class IndexTTS2:
         self.dtype = torch.float16 if self.use_fp16 else None
         self.stop_mel_token = self.cfg.gpt.stop_mel_token
 
-        self.qwen_emo = QwenEmotion(os.path.join(self.model_dir, self.cfg.qwen_emo_path))
+        print(">> 初始化Qwen情感模型...")
+        try:
+            qwen_emo_path = os.path.join(self.model_dir, self.cfg.qwen_emo_path)
+            print(f">> Qwen模型路径: {qwen_emo_path}")
+            self.qwen_emo = QwenEmotion(qwen_emo_path)
+            print(">> ✓ Qwen情感模型初始化成功")
+        except Exception as e:
+            print(f">> ✗ Qwen情感模型初始化失败: {e}")
+            import traceback
+            print(f">> Qwen错误详情: {traceback.format_exc()}")
+            raise
 
-        self.gpt = UnifiedVoice(**self.cfg.gpt)
-        self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
-        load_checkpoint(self.gpt, self.gpt_path)
-        self.gpt = self.gpt.to(self.device)
-        if self.use_fp16:
-            self.gpt.eval().half()
-        else:
-            self.gpt.eval()
-        print(">> GPT weights restored from:", self.gpt_path)
+        print(">> 初始化GPT模型...")
+        try:
+            print(">> 创建UnifiedVoice实例...")
+            self.gpt = UnifiedVoice(**self.cfg.gpt)
+            print(">> ✓ UnifiedVoice实例创建成功")
+            
+            self.gpt_path = os.path.join(self.model_dir, self.cfg.gpt_checkpoint)
+            print(f">> GPT模型权重路径: {self.gpt_path}")
+            
+            print(">> 加载GPT模型权重...")
+            load_checkpoint(self.gpt, self.gpt_path)
+            print(">> ✓ GPT模型权重加载成功")
+            
+            print(f">> 将GPT模型移动到设备: {self.device}")
+            self.gpt = self.gpt.to(self.device)
+            print(">> ✓ GPT模型设备迁移成功")
+            
+            if self.use_fp16:
+                print(">> 设置GPT模型为FP16模式...")
+                self.gpt.eval().half()
+                print(">> ✓ GPT模型FP16设置成功")
+            else:
+                print(">> 设置GPT模型为FP32模式...")
+                self.gpt.eval()
+                print(">> ✓ GPT模型FP32设置成功")
+            
+            print(">> ✓ GPT模型完全加载成功:", self.gpt_path)
+        except Exception as e:
+            print(f">> ✗ GPT模型加载失败: {e}")
+            import traceback
+            print(f">> GPT错误详情: {traceback.format_exc()}")
+            raise
 
         if use_deepspeed:
             try:
@@ -108,52 +141,135 @@ class IndexTTS2:
                 print(f"{e!r}")
                 self.use_cuda_kernel = False
 
-        self.extract_features = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
-        self.semantic_model, self.semantic_mean, self.semantic_std = build_semantic_model(
-            os.path.join(self.model_dir, self.cfg.w2v_stat))
-        self.semantic_model = self.semantic_model.to(self.device)
-        self.semantic_model.eval()
-        self.semantic_mean = self.semantic_mean.to(self.device)
-        self.semantic_std = self.semantic_std.to(self.device)
+        print(">> 初始化SeamlessM4T特征提取器...")
+        try:
+            self.extract_features = SeamlessM4TFeatureExtractor.from_pretrained("facebook/w2v-bert-2.0")
+            print(">> ✓ SeamlessM4T特征提取器初始化成功")
+        except Exception as e:
+            print(f">> ✗ SeamlessM4T特征提取器初始化失败: {e}")
+            import traceback
+            print(f">> SeamlessM4T错误详情: {traceback.format_exc()}")
+            raise
 
-        semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
-        semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
-        safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
-        self.semantic_codec = semantic_codec.to(self.device)
-        self.semantic_codec.eval()
-        print('>> semantic_codec weights restored from: {}'.format(semantic_code_ckpt))
+        print(">> 初始化语义模型...")
+        try:
+            w2v_stat_path = os.path.join(self.model_dir, self.cfg.w2v_stat)
+            print(f">> W2V统计文件路径: {w2v_stat_path}")
+            self.semantic_model, self.semantic_mean, self.semantic_std = build_semantic_model(w2v_stat_path)
+            
+            print(f">> 将语义模型移动到设备: {self.device}")
+            self.semantic_model = self.semantic_model.to(self.device)
+            self.semantic_model.eval()
+            self.semantic_mean = self.semantic_mean.to(self.device)
+            self.semantic_std = self.semantic_std.to(self.device)
+            print(">> ✓ 语义模型初始化成功")
+        except Exception as e:
+            print(f">> ✗ 语义模型初始化失败: {e}")
+            import traceback
+            print(f">> 语义模型错误详情: {traceback.format_exc()}")
+            raise
 
-        s2mel_path = os.path.join(self.model_dir, self.cfg.s2mel_checkpoint)
-        s2mel = MyModel(self.cfg.s2mel, use_gpt_latent=True)
-        s2mel, _, _, _ = load_checkpoint2(
-            s2mel,
-            None,
-            s2mel_path,
-            load_only_params=True,
-            ignore_modules=[],
-            is_distributed=False,
-        )
-        self.s2mel = s2mel.to(self.device)
-        self.s2mel.models['cfm'].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
-        self.s2mel.eval()
-        print(">> s2mel weights restored from:", s2mel_path)
+        print(">> 初始化语义编码器...")
+        try:
+            semantic_codec = build_semantic_codec(self.cfg.semantic_codec)
+            print(">> 下载语义编码器权重...")
+            semantic_code_ckpt = hf_hub_download("amphion/MaskGCT", filename="semantic_codec/model.safetensors")
+            print(f">> 语义编码器权重路径: {semantic_code_ckpt}")
+            
+            safetensors.torch.load_model(semantic_codec, semantic_code_ckpt)
+            self.semantic_codec = semantic_codec.to(self.device)
+            self.semantic_codec.eval()
+            print('>> ✓ 语义编码器加载成功: {}'.format(semantic_code_ckpt))
+        except Exception as e:
+            print(f">> ✗ 语义编码器加载失败: {e}")
+            import traceback
+            print(f">> 语义编码器错误详情: {traceback.format_exc()}")
+            raise
+
+        print(">> 初始化S2Mel模型...")
+        try:
+            s2mel_path = os.path.join(self.model_dir, self.cfg.s2mel_checkpoint)
+            print(f">> S2Mel模型权重路径: {s2mel_path}")
+            
+            print(">> 创建S2Mel模型实例...")
+            s2mel = MyModel(self.cfg.s2mel, use_gpt_latent=True)
+            print(">> ✓ S2Mel模型实例创建成功")
+            
+            print(">> 加载S2Mel模型权重...")
+            s2mel, _, _, _ = load_checkpoint2(
+                s2mel,
+                None,
+                s2mel_path,
+                load_only_params=True,
+                ignore_modules=[],
+                is_distributed=False,
+            )
+            print(">> ✓ S2Mel模型权重加载成功")
+            
+            print(f">> 将S2Mel模型移动到设备: {self.device}")
+            self.s2mel = s2mel.to(self.device)
+            print(">> ✓ S2Mel模型设备迁移成功")
+            
+            print(">> 设置S2Mel模型缓存...")
+            self.s2mel.models['cfm'].estimator.setup_caches(max_batch_size=1, max_seq_length=8192)
+            print(">> ✓ S2Mel模型缓存设置成功")
+            
+            self.s2mel.eval()
+            print(">> ✓ S2Mel模型完全加载成功:", s2mel_path)
+        except Exception as e:
+            print(f">> ✗ S2Mel模型加载失败: {e}")
+            import traceback
+            print(f">> S2Mel错误详情: {traceback.format_exc()}")
+            raise
 
         # load campplus_model
-        campplus_ckpt_path = hf_hub_download(
-            "funasr/campplus", filename="campplus_cn_common.bin"
-        )
-        campplus_model = CAMPPlus(feat_dim=80, embedding_size=192)
-        campplus_model.load_state_dict(torch.load(campplus_ckpt_path, map_location="cpu"))
-        self.campplus_model = campplus_model.to(self.device)
-        self.campplus_model.eval()
-        print(">> campplus_model weights restored from:", campplus_ckpt_path)
+        print(">> 开始加载CAMPPlus模型...")
+        try:
+            campplus_ckpt_path = hf_hub_download(
+                "funasr/campplus", filename="campplus_cn_common.bin"
+            )
+            print(f">> CAMPPlus模型文件下载路径: {campplus_ckpt_path}")
+            campplus_model = CAMPPlus(feat_dim=80, embedding_size=192)
+            campplus_model.load_state_dict(torch.load(campplus_ckpt_path, map_location="cpu"))
+            self.campplus_model = campplus_model.to(self.device)
+            self.campplus_model.eval()
+            print(">> ✓ CAMPPlus模型加载成功:", campplus_ckpt_path)
+        except Exception as e:
+            print(f">> ✗ CAMPPlus模型加载失败: {e}")
+            import traceback
+            print(f">> CAMPPlus错误详情: {traceback.format_exc()}")
+            raise
 
-        bigvgan_name = self.cfg.vocoder.name
-        self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=self.use_cuda_kernel)
-        self.bigvgan = self.bigvgan.to(self.device)
-        self.bigvgan.remove_weight_norm()
-        self.bigvgan.eval()
-        print(">> bigvgan weights restored from:", bigvgan_name)
+        # load bigvgan_model
+        print(">> 开始加载BigVGAN模型...")
+        try:
+            bigvgan_name = self.cfg.vocoder.name
+            print(f">> BigVGAN模型名称: {bigvgan_name}")
+            print(f">> 使用CUDA内核: {self.use_cuda_kernel}")
+            
+            # 检查BigVGAN from_pretrained方法
+            print(">> 调用BigVGAN.from_pretrained...")
+            self.bigvgan = bigvgan.BigVGAN.from_pretrained(bigvgan_name, use_cuda_kernel=self.use_cuda_kernel)
+            print(">> ✓ BigVGAN模型实例创建成功")
+            
+            print(f">> 将BigVGAN模型移动到设备: {self.device}")
+            self.bigvgan = self.bigvgan.to(self.device)
+            print(">> ✓ BigVGAN模型设备迁移成功")
+            
+            print(">> 移除BigVGAN权重标准化...")
+            self.bigvgan.remove_weight_norm()
+            print(">> ✓ BigVGAN权重标准化移除成功")
+            
+            print(">> 设置BigVGAN为评估模式...")
+            self.bigvgan.eval()
+            print(">> ✓ BigVGAN模型加载完全成功:", bigvgan_name)
+            
+        except Exception as e:
+            print(f">> ✗ BigVGAN模型加载失败: {e}")
+            print(f">> BigVGAN错误类型: {type(e).__name__}")
+            import traceback
+            print(f">> BigVGAN错误详情: {traceback.format_exc()}")
+            raise
 
         self.bpe_path = os.path.join(self.model_dir, self.cfg.dataset["bpe_model"])
         self.normalizer = TextNormalizer()
