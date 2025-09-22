@@ -13,6 +13,13 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import logging
 
+# 设置环境变量以优化内存使用
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:512"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # 用于调试
+# 设置HuggingFace缓存目录
+os.environ["HF_HOME"] = os.path.join(os.getcwd(), "hf_cache")
+os.environ["TRANSFORMERS_CACHE"] = os.path.join(os.getcwd(), "hf_cache", "transformers")
+
 # 添加项目路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -32,8 +39,79 @@ import base64
 from indextts.infer_v2 import IndexTTS2
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+def check_system_resources():
+    """检查系统资源"""
+    import psutil
+    
+    # 系统内存
+    memory = psutil.virtual_memory()
+    logger.info(f"系统内存: {memory.total / 1024**3:.2f} GB (可用: {memory.available / 1024**3:.2f} GB)")
+    
+    # GPU信息
+    if torch.cuda.is_available():
+        device_name = torch.cuda.get_device_name(0)
+        total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        logger.info(f"GPU设备: {device_name}")
+        logger.info(f"GPU总内存: {total_memory:.2f} GB")
+        
+        # 检查GPU内存碎片
+        torch.cuda.empty_cache()
+        allocated = torch.cuda.memory_allocated(0) / 1024**3
+        cached = torch.cuda.memory_reserved(0) / 1024**3
+        logger.info(f"当前GPU内存使用: {allocated:.2f} GB (已分配), {cached:.2f} GB (已缓存)")
+        
+        # 内存不足警告
+        if total_memory < 8.0:
+            logger.warning(f"GPU内存较少 ({total_memory:.1f} GB)，可能导致加载失败")
+        
+    else:
+        logger.warning("未检测到CUDA设备，将使用CPU模式")
+    
+    # 检查磁盘空间
+    disk = psutil.disk_usage(os.getcwd())
+    logger.info(f"磁盘空间: {disk.total / 1024**3:.1f} GB (可用: {disk.free / 1024**3:.1f} GB)")
+
+# 系统资源检查
+check_system_resources()
+
+# 增强的IndexTTS2包装类，用于添加详细日志
+class IndexTTS2WithLogging(IndexTTS2):
+    """带详细日志的IndexTTS2包装类"""
+    
+    def __init__(self, *args, **kwargs):
+        logger.info("开始详细的IndexTTS2初始化过程...")
+        
+        def log_memory_usage(step_name):
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated(0) / 1024**3
+                cached = torch.cuda.memory_reserved(0) / 1024**3
+                logger.info(f"[{step_name}] GPU内存: {allocated:.2f} GB (已分配), {cached:.2f} GB (已缓存)")
+        
+        try:
+            # 调用父类初始化，但添加详细的中间日志
+            logger.info("步骤1: 开始设备检测和配置...")
+            log_memory_usage("设备检测前")
+            
+            # 临时修改父类的__init__方法来添加日志
+            original_init = super().__init__
+            
+            # 先进行基础初始化
+            logger.info("步骤2: 初始化基础配置...")
+            super().__init__(*args, **kwargs)
+            
+            logger.info("IndexTTS2初始化成功完成!")
+            log_memory_usage("完全初始化后")
+            
+        except Exception as e:
+            logger.error(f"IndexTTS2初始化过程中出错: {e}")
+            log_memory_usage("初始化失败时")
+            raise
 
 # 全局变量
 tts_model = None
@@ -95,7 +173,22 @@ def initialize_model():
     try:
         logger.info("正在初始化IndexTTS2模型...")
         
+        # 检查CUDA可用性和内存
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0)
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            logger.info(f"检测到GPU设备: {device_name}")
+            logger.info(f"GPU总内存: {total_memory:.2f} GB")
+            
+            # 显示当前GPU内存使用情况
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            cached = torch.cuda.memory_reserved(0) / 1024**3
+            logger.info(f"当前GPU内存使用: {allocated:.2f} GB (已分配), {cached:.2f} GB (已缓存)")
+        else:
+            logger.warning("未检测到CUDA设备，将使用CPU模式")
+        
         # 检查模型文件是否存在
+        logger.info("检查模型文件...")
         required_files = [
             "config.yaml",
             "gpt.pth", 
@@ -110,9 +203,26 @@ def initialize_model():
             file_path = os.path.join(model_dir, file)
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"缺少必要文件: {file_path}")
+            file_size = os.path.getsize(file_path) / 1024**2
+            logger.info(f"✓ 找到文件: {file} ({file_size:.1f} MB)")
+        
+        logger.info("所有模型文件检查完成")
+        
+        # 初始化模型，添加详细的步骤日志
+        logger.info("开始初始化IndexTTS2模型...")
+        logger.info("步骤1: 创建IndexTTS2实例...")
+        
+        # 监控内存使用
+        def log_memory_usage(step_name):
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated(0) / 1024**3
+                cached = torch.cuda.memory_reserved(0) / 1024**3
+                logger.info(f"{step_name} - GPU内存: {allocated:.2f} GB (已分配), {cached:.2f} GB (已缓存)")
+        
+        log_memory_usage("初始化前")
         
         # 初始化模型
-        tts_model = IndexTTS2(
+        tts_model = IndexTTS2WithLogging(
             cfg_path=config_path,
             model_dir=model_dir,
             use_fp16=True,
@@ -121,11 +231,29 @@ def initialize_model():
             device=None
         )
         
+        log_memory_usage("初始化完成后")
+        
         logger.info("IndexTTS2模型初始化完成！")
+        
+        # 最终内存使用报告
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            cached = torch.cuda.memory_reserved(0) / 1024**3
+            logger.info(f"模型加载完成 - 最终GPU内存使用: {allocated:.2f} GB (已分配), {cached:.2f} GB (已缓存)")
+        
         return True
         
     except Exception as e:
         logger.error(f"模型初始化失败: {e}")
+        logger.error(f"错误类型: {type(e).__name__}")
+        import traceback
+        logger.error(f"完整错误信息: {traceback.format_exc()}")
+        
+        # 内存清理
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.info("已清理GPU缓存")
+        
         return False
 
 # 启动时初始化模型
