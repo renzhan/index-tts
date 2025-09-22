@@ -177,7 +177,7 @@ def test_step_by_step_loading():
         try:
             with timeout(120):  # 2分钟超时
                 from indextts.gpt.model_v2 import UnifiedVoice
-                from indextts.utils import load_checkpoint
+                from indextts.utils.checkpoint import load_checkpoint
                 
                 logger.info("创建GPT模型实例...")
                 gpt = UnifiedVoice(**cfg.gpt)
