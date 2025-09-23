@@ -253,7 +253,8 @@ def initialize_model():
                 result = subprocess.run(['gcc', '--version'], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     gcc_output = result.stdout
-                    logger.info(f"GCC版本信息: {gcc_output.split('gcc')[1].split('\\n')[0] if 'gcc' in gcc_output else 'Unknown'}")
+                    gcc_info = gcc_output.split('gcc')[1].split('\n')[0] if 'gcc' in gcc_output else 'Unknown'
+                    logger.info(f"GCC版本信息: {gcc_info}")
                     
                     # 简单检查：如果有gcc 9+，可以尝试CUDA内核
                     if any(f'gcc {i}' in gcc_output.lower() or f'gcc-{i}' in gcc_output.lower() 
