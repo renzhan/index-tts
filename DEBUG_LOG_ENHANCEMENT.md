@@ -76,19 +76,27 @@
 
 ## 使用方法
 
-### 运行带详细日志的API服务器
+### 运行环境检查工具
 ```bash
+uv run check_environment.py
+```
+
+### 运行带详细日志的API服务器（安全模式）
+```bash
+# 方法1：使用启动脚本（推荐）
+./start_api_safe.sh
+
+# 方法2：手动启动并禁用CUDA内核
+uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2 --disable-cuda-kernel
+
+# 方法3：使用环境变量
+export DISABLE_CUDA_KERNEL=1
 uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2
 ```
 
-### 运行独立的模型初始化测试
+### 运行带CUDA内核的API服务器（高性能模式）
 ```bash
-uv run test_model_init.py
-```
-
-### 运行BigVGAN下载测试
-```bash
-uv run test_bigvgan_download.py
+uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2
 ```
 
 ## 日志输出示例
@@ -116,13 +124,45 @@ uv run test_bigvgan_download.py
 >> BigVGAN错误详情: [完整堆栈跟踪]
 ```
 
+## CUDA内核编译问题解决方案
+
+### 问题症状
+- 服务器在初始化过程中卡住不动
+- 日志显示CUDA内核编译错误
+- GCC版本相关的编译错误
+
+### 解决方案
+
+#### 方案1：使用安全启动脚本（推荐）
+```bash
+./start_api_safe.sh
+```
+
+#### 方案2：禁用CUDA内核
+```bash
+uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2 --disable-cuda-kernel
+```
+
+#### 方案3：设置环境变量
+```bash
+export DISABLE_CUDA_KERNEL=1
+export TORCH_CUDA_ARCH_LIST=""
+uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2
+```
+
+### 性能说明
+- 禁用CUDA内核不会影响模型的核心功能
+- 语音合成质量保持完全一致
+- 推理速度可能有轻微下降（通常可忽略不计）
+- GPU仍然会被正常使用，只是BigVGAN的某些优化被禁用
+
 ## 下一步调试
 
-根据详细的日志输出，你可以确定BigVGAN加载失败的具体原因：
+根据详细的日志输出，你可以确定问题的具体原因：
 
-1. **网络问题**: 如果错误发生在`from_pretrained`阶段
-2. **内存问题**: 如果错误发生在设备迁移阶段  
-3. **CUDA问题**: 如果错误与CUDA内核相关
+1. **CUDA编译问题**: 使用 `--disable-cuda-kernel` 参数
+2. **网络问题**: 如果错误发生在模型下载阶段  
+3. **内存问题**: 如果错误发生在设备迁移阶段
 4. **模型文件问题**: 如果错误发生在权重加载阶段
 
 这些详细的日志将帮助你精确定位问题所在。 

@@ -132,13 +132,15 @@ class IndexTTS2:
 
         if self.use_cuda_kernel:
             # preload the CUDA kernel for BigVGAN
+            print(">> 尝试预加载BigVGAN的CUDA内核...")
             try:
                 from indextts.s2mel.modules.bigvgan.alias_free_activation.cuda import activation1d
-
-                print(">> Preload custom CUDA kernel for BigVGAN", activation1d.anti_alias_activation_cuda)
+                print(">> ✓ BigVGAN CUDA内核预加载成功", activation1d.anti_alias_activation_cuda)
             except Exception as e:
-                print(">> Failed to load custom CUDA kernel for BigVGAN. Falling back to torch.")
-                print(f"{e!r}")
+                print(">> ✗ BigVGAN CUDA内核加载失败，回退到PyTorch模式")
+                print(f">> CUDA内核错误详情: {e!r}")
+                print(">> 这通常是由于GCC版本过低或CUDA环境配置问题引起的")
+                print(">> 将使用PyTorch原生实现，性能可能稍有下降但功能正常")
                 self.use_cuda_kernel = False
 
         print(">> 初始化SeamlessM4T特征提取器...")

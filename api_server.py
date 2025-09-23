@@ -133,6 +133,7 @@ class IndexTTS2WithLogging(IndexTTS2):
 tts_model = None
 model_dir = "models/IndexTTS-2"
 config_path = os.path.join(model_dir, "config.yaml")
+disable_cuda_kernel = False  # 是否禁用CUDA内核
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -237,12 +238,48 @@ def initialize_model():
         
         log_memory_usage("初始化前")
         
+        # 检查系统环境，智能选择CUDA内核选项
+        use_cuda_kernel = False  # 默认关闭CUDA内核
+        
+        # 检查是否通过命令行或环境变量禁用CUDA内核
+        env_disable = os.environ.get('DISABLE_CUDA_KERNEL', '').lower() in ['1', 'true', 'yes']
+        if disable_cuda_kernel or env_disable:
+            logger.info("CUDA内核已通过命令行参数或环境变量禁用")
+            use_cuda_kernel = False
+        elif torch.cuda.is_available():
+            try:
+                # 检查GCC版本
+                import subprocess
+                result = subprocess.run(['gcc', '--version'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    gcc_output = result.stdout
+                    logger.info(f"GCC版本信息: {gcc_output.split('gcc')[1].split('\\n')[0] if 'gcc' in gcc_output else 'Unknown'}")
+                    
+                    # 简单检查：如果有gcc 9+，可以尝试CUDA内核
+                    if any(f'gcc {i}' in gcc_output.lower() or f'gcc-{i}' in gcc_output.lower() 
+                           for i in range(9, 15)):
+                        logger.info("检测到GCC 9+，尝试启用CUDA内核")
+                        logger.warning("注意：CUDA内核编译可能需要较长时间，如遇到问题请使用 --disable-cuda-kernel 参数")
+                        use_cuda_kernel = True
+                    else:
+                        logger.warning("GCC版本可能过低，为避免编译错误将禁用CUDA内核")
+                else:
+                    logger.warning("无法检测GCC版本，为安全起见禁用CUDA内核")
+            except Exception as e:
+                logger.warning(f"环境检查失败，禁用CUDA内核: {e}")
+        else:
+            logger.info("CUDA不可用，禁用CUDA内核")
+        
+        logger.info(f"CUDA内核状态: {'启用' if use_cuda_kernel else '禁用'}")
+        if use_cuda_kernel:
+            logger.info("如果初始化过程中卡住，请按Ctrl+C中断并使用 --disable-cuda-kernel 参数重启")
+        
         # 初始化模型
         tts_model = IndexTTS2WithLogging(
             cfg_path=config_path,
             model_dir=model_dir,
             use_fp16=True,
-            use_cuda_kernel=torch.cuda.is_available(),
+            use_cuda_kernel=use_cuda_kernel,
             use_deepspeed=False,
             device=None
         )
@@ -518,12 +555,14 @@ if __name__ == "__main__":
     parser.add_argument("--model-dir", default="models/IndexTTS-2", help="模型目录")
     parser.add_argument("--workers", type=int, default=1, help="工作进程数")
     parser.add_argument("--reload", action="store_true", help="开发模式，自动重载")
+    parser.add_argument("--disable-cuda-kernel", action="store_true", help="禁用CUDA内核（避免编译问题）")
     
     args = parser.parse_args()
     
     # 更新全局变量
     model_dir = args.model_dir
     config_path = os.path.join(model_dir, "config.yaml")
+    disable_cuda_kernel = args.disable_cuda_kernel
     
     # 启动服务器
     uvicorn.run(
