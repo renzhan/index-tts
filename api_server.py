@@ -78,7 +78,7 @@ def check_system_resources():
     logger.info(f"磁盘空间: {disk.total / 1024**3:.1f} GB (可用: {disk.free / 1024**3:.1f} GB)")
 
 # 系统资源检查
-check_system_resources()
+# check_system_resources()
 
 # 增强的IndexTTS2包装类，用于添加详细日志
 class IndexTTS2WithLogging(IndexTTS2):
