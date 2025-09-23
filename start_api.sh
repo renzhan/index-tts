@@ -38,4 +38,4 @@ export OMP_NUM_THREADS=4
 
 # 启动API服务器
 echo "启动API服务器..."
-uv run api_server.py --host 0.0.0.0 --port 8000 --model-dir models/IndexTTS-2
+uv run api_server.py --host 0.0.0.0 --port 8040 --model-dir models/IndexTTS-2
